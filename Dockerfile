@@ -1,5 +1,5 @@
-# Using Node.js 16 as the base image
-FROM node:16
+# Using Node.js 20 Alpine as the base image to clear OS vulnerabilities
+FROM node:20-alpine
 
 # Setting up the working directory
 WORKDIR /app
