@@ -120,8 +120,7 @@ pipeline {
                 }
             }
         }
-
-        stage('Deploy') {
+stage('Deploy') {
             steps {
                 script {
                     def appServerIp = '172.31.1.191'
@@ -138,25 +137,20 @@ pipeline {
                                   -p 3000:3000 \\
                                   ${IMAGE_REPO}:${IMAGE_TAG} &&
                                 echo "Waiting for application to boot..." &&
-                                SUCCESS=0 &&
                                 for i in \$(seq 1 10); do
                                     if curl -sf http://localhost:3000 > /dev/null; then
                                         echo "Health check passed!"
-                                        SUCCESS=1
-                                        break
+                                        exit 0
                                     fi
                                     echo "Attempt \$i failed, retrying in 3 seconds..."
                                     sleep 3
-                                done &&
-                                if [ \$SUCCESS -eq 0 ]; then
-                                    echo "Health check timed out!"
-                                    exit 1
-                                fi
+                                done
+                                echo "Health check timed out after 30 seconds!"
+                                exit 1
                             '
                         """
                     }
                 }
             }
         }
-    }
-}
+        
