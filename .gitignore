@@ -1,0 +1,9 @@
+# Terraform local and state files
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+
+# Private keys and credentials
+*.pem
