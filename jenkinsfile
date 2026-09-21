@@ -62,13 +62,14 @@ pipeline {
             }
         }
 
-  stage('OWASP FS Scan') {
-    steps {
-        withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_KEY')]) {
-            dependencyCheck additionalArguments: "--nvdApiKey ${env.NVD_KEY}", odcInstallation: 'DP-Check'
+        stage('OWASP FS Scan') {
+            steps {
+                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_KEY')]) {
+                    dependencyCheck additionalArguments: "--nvdApiKey ${env.NVD_KEY}", odcInstallation: 'DP-Check'
+                }
+            }
         }
-    }
-}
+
         stage('Trivy FS Scan') {
             steps {
                 sh '''
@@ -130,13 +131,22 @@ pipeline {
                             ssh -o StrictHostKeyChecking=no ubuntu@${appServerIp} '
                                 docker pull ${IMAGE_REPO}:${IMAGE_TAG} &&
                                 docker rm -f swiggy || true &&
-                                docker run -d \
-                                  --name swiggy \
-                                  --restart unless-stopped \
-                                  -p 3000:3000 \
+                                docker run -d \\
+                                  --name swiggy \\
+                                  --restart unless-stopped \\
+                                  -p 3000:3000 \\
                                   ${IMAGE_REPO}:${IMAGE_TAG} &&
-                                sleep 5 &&
-                                curl -f http://localhost:3000
+                                echo "Waiting for application to boot..." &&
+                                for i in \$(seq 1 10); do
+                                    if curl -sf http://localhost:3000 > /dev/null; then
+                                        echo "Health check passed!"
+                                        exit 0
+                                    fi
+                                    echo "Attempt \$i failed, retrying in 3 seconds..."
+                                    sleep 3
+                                done
+                                echo "Health check timed out after 30 seconds!"
+                                exit 1
                             '
                         """
                     }
