@@ -1,79 +1,152 @@
-pipeline{
+pipeline {
     agent any
-    tools{
+
+    options {
+        skipDefaultCheckout(true)
+        timestamps()
+    }
+
+    tools {
         jdk 'jdk17'
-        nodejs 'node23'
+        nodejs 'node22'
     }
+
     environment {
-        SCANNER_HOME=tool 'sonar-scanner'
+        SCANNER_HOME = tool 'sonar-scanner'
+        IMAGE_REPO = 'sarthakr1/swiggy'
+        IMAGE_TAG = "${BUILD_NUMBER}"
     }
+
     stages {
-        stage('clean workspace'){
-            steps{
+
+        stage('Clean Workspace') {
+            steps {
                 cleanWs()
             }
         }
-        stage('Checkout from Git'){
-            steps{
-                git branch: 'main', url: 'https://github.com/sarthakR1/project-swiggy.git'
+
+        stage('Checkout') {
+            steps {
+                git(
+                    branch: 'main',
+                    credentialsId: 'github-cred',
+                    url: 'https://github.com/sarthakR1/project-swiggy.git'
+                )
             }
         }
-        stage("Sonarqube Analysis "){
-            steps{
+
+        stage('Install Dependencies') {
+            steps {
+                sh 'npm ci'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
                 withSonarQubeEnv('sonar-server') {
-                    sh ''' 
-                    $SCANNER_HOME/bin/sonar-scanner \
-                        -Dsonar.projectName=Swiggy \
-                        -Dsonar.projectKey=Swiggy 
+                    sh '''
+                        $SCANNER_HOME/bin/sonar-scanner \
+                          -Dsonar.projectName=Swiggy \
+                          -Dsonar.projectKey=Swiggy
                     '''
                 }
             }
         }
-        stage("quality gate"){
-           steps {
+
+        stage('Quality Gate') {
+            steps {
                 script {
-                    waitForQualityGate abortPipeline: false, credentialsId: 'sonarqube-token' 
+                    waitForQualityGate abortPipeline: true
                 }
-            } 
-        }
-        stage('Install Dependencies') {
-            steps {
-                sh "npm install"
             }
         }
-        stage('OWASP FS SCAN') {
+
+        stage('OWASP FS Scan') {
             steps {
-                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
-                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+                dependencyCheck(
+                    odcInstallation: 'DP-Check',
+                    nvdCredentialsId: 'nvd-api-key',
+                    additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit'
+                )
+
+                dependencyCheckPublisher(
+                    pattern: '**/dependency-check-report.xml'
+                )
             }
         }
-        stage('TRIVY FS SCAN') {
+
+        stage('Trivy FS Scan') {
             steps {
-                sh "trivy fs . > trivyfs.txt"
+                sh '''
+                    trivy fs \
+                      --scanners vuln \
+                      --severity HIGH,CRITICAL \
+                      --ignore-unfixed \
+                      --exit-code 1 \
+                      . | tee trivyfs.txt
+                '''
             }
         }
-        stage("Docker Build & Push"){
-            steps{
-                script{
-                   withDockerRegistry(credentialsId: 'dockerhub-cred', toolName: 'docker'){   
-                       sh "docker build -t swiggy ."
-                       sh "docker tag swiggy sarthakr1/swiggy:latest "
-                       sh "docker push sarthakr1/swiggy:latest "
+
+        stage('Docker Build') {
+            steps {
+                sh '''
+                    docker build \
+                      -t ${IMAGE_REPO}:${IMAGE_TAG} \
+                      -t ${IMAGE_REPO}:latest .
+                '''
+            }
+        }
+
+        stage('Trivy Image Scan') {
+            steps {
+                sh '''
+                    trivy image \
+                      --severity HIGH,CRITICAL \
+                      --ignore-unfixed \
+                      --exit-code 1 \
+                      ${IMAGE_REPO}:${IMAGE_TAG} | tee trivy.txt
+                '''
+            }
+        }
+
+        stage('Docker Push') {
+            steps {
+                script {
+                    withDockerRegistry(
+                        credentialsId: 'dockerhub-cred',
+                        toolName: 'docker'
+                    ) {
+                        sh '''
+                            docker push ${IMAGE_REPO}:${IMAGE_TAG}
+                            docker push ${IMAGE_REPO}:latest
+                        '''
                     }
                 }
             }
         }
-        stage("TRIVY"){
-            steps{
-                sh "trivy image sarthakr1/swiggy:latest > trivy.txt" 
-            }
-        }
-        stage('Deploy to container'){
-            steps{
-                sh '''
-                docker rm -f swiggy || true
-                docker run -d --name swiggy -p 3000:3000 sarthakr1/swiggy:latest
-                '''
+
+        stage('Deploy') {
+            steps {
+                script {
+                    def appServerIp = '172.31.1.191'
+
+                    sshagent(credentials: ['app-ssh-key']) {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no ubuntu@${appServerIp} '
+                                docker pull ${IMAGE_REPO}:${IMAGE_TAG} &&
+                                docker rm -f swiggy || true &&
+                                docker run -d \
+                                  --name swiggy \
+                                  --restart unless-stopped \
+                                  -p 3000:3000 \
+                                  ${IMAGE_REPO}:${IMAGE_TAG} &&
+                                sleep 5 &&
+                                curl -f http://localhost:3000
+                            '
+                        """
+                    }
+                }
             }
         }
     }
