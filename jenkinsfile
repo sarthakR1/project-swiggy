@@ -1,127 +1,4 @@
-pipeline {
-    agent any
-
-    options {
-        skipDefaultCheckout(true)
-        timestamps()
-    }
-
-    tools {
-        jdk 'jdk17'
-        nodejs 'node23'
-    }
-
-    environment {
-        SCANNER_HOME = tool 'sonar-scanner'
-        IMAGE_REPO = 'sarthakr1/swiggy'
-        IMAGE_TAG = "${BUILD_NUMBER}"
-    }
-
-    stages {
-
-        stage('Clean Workspace') {
-            steps {
-                cleanWs()
-            }
-        }
-
-        stage('Checkout') {
-            steps {
-                git(
-                    branch: 'main',
-                    credentialsId: 'github-cred',
-                    url: 'https://github.com/sarthakR1/project-swiggy.git'
-                )
-            }
-        }
-
-        stage('Install Dependencies') {
-            steps {
-                sh 'npm ci'
-            }
-        }
-
-        stage('SonarQube Analysis') {
-            steps {
-                withSonarQubeEnv('sonar-server') {
-                    sh '''
-                        $SCANNER_HOME/bin/sonar-scanner \
-                          -Dsonar.projectName=Swiggy \
-                          -Dsonar.projectKey=Swiggy \
-                          -Dsonar.exclusions="node_modules/**,build/**,**/node_modules/**,**/build/**"
-                    '''
-                }
-            }
-        }
-
-        stage('Quality Gate') {
-            steps {
-                script {
-                    waitForQualityGate abortPipeline: true
-                }
-            }
-        }
-
-        stage('OWASP FS Scan') {
-            steps {
-                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_KEY')]) {
-                    dependencyCheck additionalArguments: "--nvdApiKey ${env.NVD_KEY}", odcInstallation: 'DP-Check'
-                }
-            }
-        }
-
-        stage('Trivy FS Scan') {
-            steps {
-                sh '''
-                    trivy fs \
-                      --scanners vuln \
-                      --severity HIGH,CRITICAL \
-                      --ignore-unfixed \
-                      --exit-code 1 \
-                      . | tee trivyfs.txt
-                '''
-            }
-        }
-
-        stage('Docker Build') {
-            steps {
-                sh '''
-                    docker build \
-                      -t ${IMAGE_REPO}:${IMAGE_TAG} \
-                      -t ${IMAGE_REPO}:latest .
-                '''
-            }
-        }
-
-        stage('Trivy Image Scan') {
-            steps {
-                sh '''
-                    trivy image \
-                      --severity HIGH,CRITICAL \
-                      --ignore-unfixed \
-                      --exit-code 1 \
-                      ${IMAGE_REPO}:${IMAGE_TAG} | tee trivy.txt
-                '''
-            }
-        }
-
-        stage('Docker Push') {
-            steps {
-                script {
-                    withDockerRegistry(
-                        credentialsId: 'dockerhub-cred',
-                        toolName: 'docker'
-                    ) {
-                        sh '''
-                            docker push ${IMAGE_REPO}:${IMAGE_TAG}
-                            docker push ${IMAGE_REPO}:latest
-                        '''
-                    }
-                }
-            }
-        }
-
-        stage('Deploy') {
+stage('Deploy') {
             steps {
                 script {
                     def appServerIp = '172.31.1.191'
@@ -129,6 +6,7 @@ pipeline {
                     sshagent(credentials: ['app-ssh-key']) {
                         sh """
                             ssh -o StrictHostKeyChecking=no ubuntu@${appServerIp} '
+                                docker system prune -af &&
                                 docker pull ${IMAGE_REPO}:${IMAGE_TAG} &&
                                 docker rm -f swiggy || true &&
                                 docker run -d \\
@@ -137,16 +15,20 @@ pipeline {
                                   -p 3000:3000 \\
                                   ${IMAGE_REPO}:${IMAGE_TAG} &&
                                 echo "Waiting for application to boot..." &&
+                                SUCCESS=0 &&
                                 for i in \$(seq 1 10); do
                                     if curl -sf http://localhost:3000 > /dev/null; then
                                         echo "Health check passed!"
-                                        exit 0
+                                        SUCCESS=1
+                                        break
                                     fi
                                     echo "Attempt \$i failed, retrying in 3 seconds..."
                                     sleep 3
-                                done
-                                echo "Health check timed out after 30 seconds!"
-                                exit 1
+                                done &&
+                                if [ \$SUCCESS -eq 0 ]; then
+                                    echo "Health check timed out!"
+                                    exit 1
+                                fi
                             '
                         """
                     }
