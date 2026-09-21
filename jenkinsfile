@@ -120,7 +120,8 @@ pipeline {
                 }
             }
         }
-stage('Deploy') {
+
+        stage('Deploy') {
             steps {
                 script {
                     def appServerIp = '172.31.1.191'
@@ -153,4 +154,5 @@ stage('Deploy') {
                 }
             }
         }
-        
+    }
+}
