@@ -140,7 +140,7 @@ pipeline {
         stage('Deploy (Node 1)') {
             steps {
                 script {
-                    def appServerIp = '10.0.1.5' // Update to your Node 1 private IP if different
+                    def appServerIp = '10.0.1.77' // Update to your Node 1 private IP if different
 
                     sshagent(credentials: ['aws-ssh-key']) {
                         sh """
