@@ -61,13 +61,32 @@ pipeline {
             }
         }
 
-        stage('OWASP FS Scan') {
-            steps {
-                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_KEY')]) {
-                    dependencyCheck additionalArguments: "--nvdApiKey ${env.NVD_KEY}", odcInstallation: 'dependency-check'
-                }
-            }
+stage('OWASP Dependency Check') {
+    steps {
+        withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_KEY')]) {
+            dependencyCheck(
+                odcInstallation: 'dependency-check',
+                additionalArguments: '''
+                    --nvdApiKey ${NVD_KEY} 
+                    --format HTML 
+                    --format XML 
+                    --exclude "**/node_modules/**" 
+                    --exclude "**/target/**" 
+                    --exclude "**/dist/**" 
+                    --exclude "**/.git/**" 
+                    --disableAssembly 
+                    --disableNodeJS
+                '''.stripIndent().replaceAll("\n", " ")
+            )
         }
+    }
+    post {
+        always {
+            // Publishes the results and displays the trend report in Jenkins UI
+            dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+        }
+    }
+}
 
         stage('Trivy FS Scan') {
             steps {
