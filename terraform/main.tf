@@ -4,7 +4,7 @@ variable "key_name" {
 
 # Node 1: Web Server (t2.micro, 60 GB Storage, Pre-installed with Docker)
 resource "aws_instance" "web_server" {
-  ami                         = "ami-0c55b159cbfafe1f0" # Ubuntu 22.04 LTS
+  ami                         = "ami-01a00762f46d584a1" # Ubuntu 22.04 LTS
   instance_type               = "t3.micro"
   subnet_id                   = aws_subnet.public_subnet.id
   vpc_security_group_ids      = [aws_security_group.web_sg.id]
@@ -33,7 +33,7 @@ resource "aws_instance" "web_server" {
 
 # Node 2: Configuration / CI-CD Hub (c7i-flex.large[cite: 3], 60 GB Storage, Jenkins, SonarQube, Trivy, Docker)
 resource "aws_instance" "config_node" {
-  ami                         = "ami-0c55b159cbfafe1f0" 
+  ami                         = "ami-01a00762f46d584a1" 
   instance_type               = "c7i-flex.large"
   subnet_id                   = aws_subnet.public_subnet.id
   vpc_security_group_ids      = [aws_security_group.jenkins_sg.id]
@@ -72,8 +72,8 @@ resource "aws_instance" "config_node" {
 
 # Node 3: Monitoring Node (t2.micro, 60 GB Storage, CloudWatch IAM Profile)
 resource "aws_instance" "monitor_node" {
-  ami                         = "ami-0c55b159cbfafe1f0"
-  instance_type               = "t2.micro"
+  ami                         = "ami-01a00762f46d584a1"
+  instance_type               = "t3.micro"
   subnet_id                   = aws_subnet.public_subnet.id
   vpc_security_group_ids      = [aws_security_group.monitor_sg.id]
   key_name                    = var.key_name
