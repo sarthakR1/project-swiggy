@@ -7,8 +7,8 @@ pipeline {
     }
 
     tools {
-        jdk 'jdk17'
-        nodejs 'node23'
+        jdk 'jdk21'
+        nodejs 'node20'
     }
 
     environment {
@@ -18,7 +18,6 @@ pipeline {
     }
 
     stages {
-
         stage('Clean Workspace') {
             steps {
                 cleanWs()
@@ -65,7 +64,7 @@ pipeline {
         stage('OWASP FS Scan') {
             steps {
                 withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_KEY')]) {
-                    dependencyCheck additionalArguments: "--nvdApiKey ${env.NVD_KEY}", odcInstallation: 'DP-Check'
+                    dependencyCheck additionalArguments: "--nvdApiKey ${env.NVD_KEY}", odcInstallation: 'dependency-check'
                 }
             }
         }
@@ -109,7 +108,7 @@ pipeline {
             steps {
                 script {
                     withDockerRegistry(
-                        credentialsId: 'dockerhub-cred',
+                        credentialsId: 'docker-creds',
                         toolName: 'docker'
                     ) {
                         sh '''
@@ -121,14 +120,14 @@ pipeline {
             }
         }
 
-        stage('Deploy') {
+        stage('Deploy (Node 1)') {
             steps {
                 script {
-                    def appServerIp = '172.31.1.191'
+                    def appServerIp = '10.0.1.5' // Update to your Node 1 private IP if different
 
-                    sshagent(credentials: ['app-ssh-key']) {
+                    sshagent(credentials: ['aws-ssh-key']) {
                         sh """
-                            ssh -o StrictHostKeyChecking=no ubuntu@${appServerIp} '
+                            ssh -o StrictHostKeyChecking=no ubuntu@\${appServerIp} '
                                 docker system prune -af &&
                                 docker pull ${IMAGE_REPO}:${IMAGE_TAG} &&
                                 docker rm -f swiggy || true &&
@@ -148,6 +147,48 @@ pipeline {
                                 done
                                 echo "Health check timed out after 30 seconds!"
                                 exit 1
+                            '
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Configure Monitoring (Node 3)') {
+            steps {
+                script {
+                    def monitoringServerIp = '10.0.1.40' // Replace with your Node 3 private IP
+
+                    sshagent(credentials: ['aws-ssh-key']) {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no ubuntu@\${monitoringServerIp} '
+                                wget https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb &&
+                                sudo dpkg -i -E ./amazon-cloudwatch-agent.deb &&
+                                
+                                cat << "CONFIG_EOF" > config.json
+                                {
+                                    "agent": {
+                                        "metrics_collection_interval": 60,
+                                        "run_as_user": "root"
+                                    },
+                                    "metrics": {
+                                        "metrics_collected": {
+                                            "cpu": {
+                                                "measurement": [
+                                                    "cpu_usage_idle",
+                                                    "cpu_usage_iowait",
+                                                    "cpu_usage_user",
+                                                    "cpu_usage_system"
+                                                ],
+                                                "metrics_collection_interval": 60,
+                                                "totalcpu": false
+                                            }
+                                        }
+                                    }
+                                }
+                                CONFIG_EOF
+
+                                sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:config.json
                             '
                         """
                     }
