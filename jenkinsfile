@@ -104,12 +104,12 @@ pipeline {
             }
         }
 
-        stage('Docker Push') {
+      stage('Docker Push') {
             steps {
                 script {
                     withDockerRegistry(
-                        credentialsId: 'docker-creds',
-                        toolName: 'docker'
+                        credentialsId: 'docker-creds'
+                        // Removed toolName: 'docker' so it uses the host's system Docker client
                     ) {
                         sh '''
                             docker push ${IMAGE_REPO}:${IMAGE_TAG}
