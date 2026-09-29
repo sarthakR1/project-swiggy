@@ -61,32 +61,32 @@ pipeline {
             }
         }
 
-stage('OWASP Dependency Check') {
-    steps {
-        withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_KEY')]) {
-            dependencyCheck(
-                odcInstallation: 'dependency-check',
-                additionalArguments: '''
-                    --nvdApiKey ${NVD_KEY} 
-                    --format HTML 
-                    --format XML 
-                    --exclude "**/node_modules/**" 
-                    --exclude "**/target/**" 
-                    --exclude "**/dist/**" 
-                    --exclude "**/.git/**" 
-                    --disableAssembly 
-                    --disableNodeJS
-                '''.stripIndent().replaceAll("\n", " ")
-            )
+        stage('OWASP Dependency Check') {
+            steps {
+                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_KEY')]) {
+                    dependencyCheck(
+                        odcInstallation: 'dependency-check',
+                        additionalArguments: '''
+                            --nvdApiKey ${NVD_KEY} 
+                            --dataDirectory /var/lib/jenkins/dependency-check-data
+                            --format HTML 
+                            --format XML 
+                            --exclude "**/node_modules/**" 
+                            --exclude "**/target/**" 
+                            --exclude "**/dist/**" 
+                            --exclude "**/.git/**" 
+                            --disableAssembly 
+                            --disableNodeJS
+                        '''.stripIndent().replaceAll("\n", " ")
+                    )
+                }
+            }
+            post {
+                always {
+                    dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+                }
+            }
         }
-    }
-    post {
-        always {
-            // Publishes the results and displays the trend report in Jenkins UI
-            dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
-        }
-    }
-}
 
         stage('Trivy FS Scan') {
             steps {
@@ -123,14 +123,12 @@ stage('OWASP Dependency Check') {
             }
         }
 
-      stage('Docker Push') {
+        stage('Docker Push') {
             steps {
                 script {
-                    withDockerRegistry(
-                        credentialsId: 'docker-creds'
-                        // Removed toolName: 'docker' so it uses the host's system Docker client
-                    ) {
+                    withCredentials([usernamePassword(credentialsId: 'docker-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         sh '''
+                            echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin
                             docker push ${IMAGE_REPO}:${IMAGE_TAG}
                             docker push ${IMAGE_REPO}:latest
                         '''
