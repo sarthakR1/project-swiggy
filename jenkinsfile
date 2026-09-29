@@ -68,7 +68,6 @@ pipeline {
                         odcInstallation: 'dependency-check',
                         additionalArguments: '''
                             --nvdApiKey ${NVD_KEY} 
-                            --dataDirectory /var/lib/jenkins/dependency-check-data
                             --format HTML 
                             --format XML 
                             --exclude "**/node_modules/**" 
