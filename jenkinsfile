@@ -140,18 +140,17 @@ pipeline {
                 }
             }
         }
-
-        stage('Deploy Application & Metrics (Node 1)') {
+stage('Deploy Application & Metrics (Node 1)') {
             steps {
                 script {
                     sshagent(credentials: ['aws-ssh-key']) {
                         sh """
-                            ssh -o StrictHostKeyChecking=no ubuntu@\${NODE1_IP} '
+                            ssh -o StrictHostKeyChecking=no ubuntu@${NODE1_IP} '
                                 # 1. Clean & Deploy Swiggy App
                                 docker system prune -af &&
-                                docker pull \${IMAGE_REPO}:\${IMAGE_TAG} &&
+                                docker pull ${IMAGE_REPO}:${IMAGE_TAG} &&
                                 docker rm -f swiggy || true &&
-                                docker run -d --name swiggy --restart unless-stopped -p 3000:3000 \${IMAGE_REPO}:\${IMAGE_TAG} &&
+                                docker run -d --name swiggy --restart unless-stopped -p 3000:3000 ${IMAGE_REPO}:${IMAGE_TAG} &&
                                 
                                 # 2. Deploy Node Exporter (Server Hardware Metrics)
                                 docker rm -f node-exporter || true &&
@@ -174,7 +173,7 @@ pipeline {
                 script {
                     sshagent(credentials: ['aws-ssh-key']) {
                         sh """
-                            ssh -o StrictHostKeyChecking=no ubuntu@\${NODE3_IP} '
+                            ssh -o StrictHostKeyChecking=no ubuntu@${NODE3_IP} '
                                 # Generate Prometheus configuration targeting Node 1
                                 cat << EOF > /home/ubuntu/prometheus.yml
 global:
@@ -183,7 +182,7 @@ global:
 scrape_configs:
   - job_name: "node1-swiggy-server"
     static_configs:
-      - targets: ["\${NODE1_IP}:9100", "\${NODE1_IP}:8080"]
+      - targets: ["${NODE1_IP}:9100", "${NODE1_IP}:8080"]
 EOF
 
                                 # Run Prometheus
@@ -208,22 +207,22 @@ EOF
 
     post {
         success {
-            sh '''
-                aws sns publish \
-                  --topic-arn "${SNS_TOPIC_ARN}" \
-                  --subject "BUILD SUCCESS: Swiggy Pipeline #${BUILD_NUMBER}" \
-                  --message "Pipeline completed successfully for build #${BUILD_NUMBER}. Swiggy deployment on Node 1 is live, and Node 3 Prometheus/Grafana monitoring is active." \
-                  --region ${AWS_REGION}
-            '''
+            sh """
+                aws sns publish \\
+                  --topic-arn '${SNS_TOPIC_ARN}' \\
+                  --subject 'BUILD SUCCESS: Swiggy Pipeline #${BUILD_NUMBER}' \\
+                  --message 'Pipeline completed successfully for build #${BUILD_NUMBER}. Swiggy deployment on Node 1 is live, and Node 3 Prometheus/Grafana monitoring is active.' \\
+                  --region '${AWS_REGION}'
+            """
         }
         failure {
-            sh '''
-                aws sns publish \
-                  --topic-arn "${SNS_TOPIC_ARN}" \
-                  --subject "BUILD FAILED: Swiggy Pipeline #${BUILD_NUMBER}" \
-                  --message "Pipeline failed during build #${BUILD_NUMBER}. Please check Jenkins console logs." \
-                  --region ${AWS_REGION}
-            '''
+            sh """
+                aws sns publish \\
+                  --topic-arn '${SNS_TOPIC_ARN}' \\
+                  --subject 'BUILD FAILED: Swiggy Pipeline #${BUILD_NUMBER}' \\
+                  --message 'Pipeline failed during build #${BUILD_NUMBER}. Please check Jenkins console logs.' \\
+                  --region '${AWS_REGION}'
+            """
         }
     }
 }
