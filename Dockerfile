@@ -1,23 +1,41 @@
-# Using Node.js 20 Alpine as the base image to clear OS vulnerabilities
-FROM node:20-alpine
+# ==========================================
+# Stage 1: Build & Dependency Installation
+# ==========================================
+FROM node:20-alpine AS builder
 
-# Setting up the working directory
 WORKDIR /app
 
-# Copying the package.json and package-lock.json files to the working directory
+# Copy package manifests first to leverage Docker layer caching
 COPY package*.json ./
 
-# Installation of npm dependency
-RUN npm install
+# Install dependencies (use npm ci for reproducible builds)
+RUN npm ci
 
-# Copy the application code
+# Copy the rest of the application code
 COPY . .
 
-# Buildinf of the React app
-RUN npm run build
+# Optional: Build step if you use frontend frameworks (React/Vue/Angular)
+# RUN npm run build
 
-# Expose port 3000 to access app
+
+# ==========================================
+# Stage 2: Production Execution Environment
+# ==========================================
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+# Set environment to production
+ENV NODE_ENV=production
+
+# Copy built app and node_modules from builder stage
+COPY --from=builder /app ./
+
+# Expose application port (adjust port if your app runs on a different port like 3000 or 8080)
 EXPOSE 3000
 
-# Start your Node.js server
+# Security: Run as non-root node user provided by the alpine image
+USER node
+
+# Start the application
 CMD ["npm", "start"]
