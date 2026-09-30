@@ -136,79 +136,81 @@ stage('OWASP Dependency Check') {
             }
         }
 
-        stage('Deploy (Node 1)') {
-            steps {
-                script {
-                    def appServerIp = '10.0.1.77' // Update to your Node 1 private IP if different
+stage('Deploy (Node 1)') {
+    steps {
+        script {
+            def appServerIp = '10.0.1.77' // Update to your Node 1 private IP if different
 
-                    sshagent(credentials: ['aws-ssh-key']) {
-                        sh """
-                            ssh -o StrictHostKeyChecking=no ubuntu@\${appServerIp} '
-                                docker system prune -af &&
-                                docker pull ${IMAGE_REPO}:${IMAGE_TAG} &&
-                                docker rm -f swiggy || true &&
-                                docker run -d \\
-                                  --name swiggy \\
-                                  --restart unless-stopped \\
-                                  -p 3000:3000 \\
-                                  ${IMAGE_REPO}:${IMAGE_TAG} &&
-                                echo "Waiting for application to boot..." &&
-                                for i in \$(seq 1 10); do
-                                    if curl -sf http://localhost:3000 > /dev/null; then
-                                        echo "Health check passed!"
-                                        exit 0
-                                    fi
-                                    echo "Attempt \$i failed, retrying in 3 seconds..."
-                                    sleep 3
-                                done
-                                echo "Health check timed out after 30 seconds!"
-                                exit 1
-                            '
-                        """
-                    }
-                }
+            sshagent(credentials: ['aws-ssh-key']) {
+                sh """
+                    ssh -o StrictHostKeyChecking=no ubuntu@${appServerIp} '
+                        docker system prune -af &&
+                        docker pull ${IMAGE_REPO}:${IMAGE_TAG} &&
+                        docker rm -f swiggy || true &&
+                        docker run -d \\
+                          --name swiggy \\
+                          --restart unless-stopped \\
+                          -p 3000:3000 \\
+                          ${IMAGE_REPO}:${IMAGE_TAG} &&
+                        echo "Waiting for application to boot..." &&
+                        for i in \$(seq 1 10); do
+                            if curl -sf http://localhost:3000 > /dev/null; then
+                                echo "Health check passed!"
+                                exit 0
+                            fi
+                            echo "Attempt \$i failed, retrying in 3 seconds..."
+                            sleep 3
+                        done
+                        echo "Health check timed out after 30 seconds!"
+                        exit 1
+                    '
+                """
             }
         }
+    }
+}
 
-        stage('Configure Monitoring (Node 3)') {
-            steps {
-                script {
-                    def monitoringServerIp = '10.0.1.40' // Replace with your Node 3 private IP
+stage('Configure Monitoring (Node 3)') {
+    steps {
+        script {
+            def monitoringServerIp = '10.0.1.40' // Replace with your Node 3 private IP
 
-                    sshagent(credentials: ['aws-ssh-key']) {
-                        sh """
-                            ssh -o StrictHostKeyChecking=no ubuntu@\${monitoringServerIp} '
-                                wget https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb &&
-                                sudo dpkg -i -E ./amazon-cloudwatch-agent.deb &&
-                                
-                                cat << "CONFIG_EOF" > config.json
-                                {
-                                    "agent": {
+            sshagent(credentials: ['aws-ssh-key']) {
+                sh """
+                    ssh -o StrictHostKeyChecking=no ubuntu@${monitoringServerIp} '
+                        wget https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb &&
+                        sudo dpkg -i -E ./amazon-cloudwatch-agent.deb &&
+                        
+                        cat << "CONFIG_EOF" > config.json
+                        {
+                            "agent": {
+                                "metrics_collection_interval": 60,
+                                "run_as_user": "root"
+                            },
+                            "metrics": {
+                                "metrics_collected": {
+                                    "cpu": {
+                                        "measurement": [
+                                            "cpu_usage_idle",
+                                            "cpu_usage_iowait",
+                                            "cpu_usage_user",
+                                            "cpu_usage_system"
+                                        ],
                                         "metrics_collection_interval": 60,
-                                        "run_as_user": "root"
-                                    },
-                                    "metrics": {
-                                        "metrics_collected": {
-                                            "cpu": {
-                                                "measurement": [
-                                                    "cpu_usage_idle",
-                                                    "cpu_usage_iowait",
-                                                    "cpu_usage_user",
-                                                    "cpu_usage_system"
-                                                ],
-                                                "metrics_collection_interval": 60,
-                                                "totalcpu": false
-                                            }
-                                        }
+                                        "totalcpu": false
                                     }
                                 }
-                                CONFIG_EOF
+                            }
+                        }
+                        CONFIG_EOF
 
-                                sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:config.json
-                            '
-                        """
-                    }
-                }
+                        sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:config.json
+                    '
+                """
+            }
+        }
+    }
+}
             }
         }
     }
