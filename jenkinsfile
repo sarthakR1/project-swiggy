@@ -208,11 +208,22 @@ EOF
     }
 
     post {
-        success {
-            sh '''aws sns publish --topic-arn "${SNS_TOPIC_ARN}" --subject "BUILD SUCCESS: Swiggy Pipeline #${BUILD_NUMBER}" --message "Pipeline completed successfully for build #${BUILD_NUMBER}. Deployment on Node 1 is live." --region "${AWS_REGION}"'''
-        }
-        failure {
-            sh '''aws sns publish --topic-arn "${SNS_TOPIC_ARN}" --subject "BUILD FAILED: Swiggy Pipeline #${BUILD_NUMBER}" --message "Pipeline failed during build #${BUILD_NUMBER}. Please check Jenkins console logs." --region "${AWS_REGION}"'''
-        }
+    success {
+        sh '''
+            aws sns publish \
+              --topic-arn "arn:aws:sns:ap-south-1:176938213994:jenkins-pipeline-notifications" \
+              --subject "BUILD SUCCESS: Swiggy Pipeline #${BUILD_NUMBER}" \
+              --message "Pipeline completed successfully for build #${BUILD_NUMBER}. Deployment on Node 1 is live." \
+              --region "ap-south-1"
+        '''
+    }
+    failure {
+        sh '''
+            aws sns publish \
+              --topic-arn "arn:aws:sns:ap-south-1:176938213994:jenkins-pipeline-notifications" \
+              --subject "BUILD FAILED: Swiggy Pipeline #${BUILD_NUMBER}" \
+              --message "Pipeline failed during build #${BUILD_NUMBER}. Please check Jenkins console logs." \
+              --region "ap-south-1"
+        '''
     }
 }
