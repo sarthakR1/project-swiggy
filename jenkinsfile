@@ -12,12 +12,13 @@ pipeline {
     }
 
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'
-        IMAGE_REPO = 'sarthakr1/swiggy'
-        IMAGE_TAG = "${BUILD_NUMBER}"
-        // Define IPs globally so Groovy doesn't lose them during the sshagent steps
-        NODE1_IP = '10.0.1.77'
-        NODE3_IP = '10.0.1.40'
+        SCANNER_HOME  = tool 'sonar-scanner'
+        IMAGE_REPO    = 'sarthakr1/swiggy'
+        IMAGE_TAG     = "${BUILD_NUMBER}"
+        NODE1_IP      = '10.0.1.77'
+        NODE3_IP      = '10.0.1.40'
+        SNS_TOPIC_ARN = 'arn:aws:sns:ap-south-1:176938213994:jenkins-pipeline-notifications'
+        AWS_REGION    = 'ap-south-1'
     }
 
     stages {
@@ -140,31 +141,27 @@ pipeline {
             }
         }
 
-        stage('Deploy (Node 1)') {
+        stage('Deploy Application & Metrics (Node 1)') {
             steps {
                 script {
                     sshagent(credentials: ['aws-ssh-key']) {
                         sh """
                             ssh -o StrictHostKeyChecking=no ubuntu@\${NODE1_IP} '
+                                # 1. Clean & Deploy Swiggy App
                                 docker system prune -af &&
-                                docker pull ${IMAGE_REPO}:${IMAGE_TAG} &&
+                                docker pull \${IMAGE_REPO}:\${IMAGE_TAG} &&
                                 docker rm -f swiggy || true &&
-                                docker run -d \\
-                                  --name swiggy \\
-                                  --restart unless-stopped \\
-                                  -p 3000:3000 \\
-                                  ${IMAGE_REPO}:${IMAGE_TAG} &&
-                                echo "Waiting for application to boot..." &&
-                                for i in \$(seq 1 10); do
-                                    if curl -sf http://localhost:3000 > /dev/null; then
-                                        echo "Health check passed!"
-                                        exit 0
-                                    fi
-                                    echo "Attempt \$i failed, retrying in 3 seconds..."
-                                    sleep 3
-                                done
-                                echo "Health check timed out after 30 seconds!"
-                                exit 1
+                                docker run -d --name swiggy --restart unless-stopped -p 3000:3000 \${IMAGE_REPO}:\${IMAGE_TAG} &&
+                                
+                                # 2. Deploy Node Exporter (Server Hardware Metrics)
+                                docker rm -f node-exporter || true &&
+                                docker run -d --name node-exporter --restart unless-stopped -p 9100:9100 prom/node-exporter &&
+                                
+                                # 3. Deploy cAdvisor (Container Metrics)
+                                docker rm -f cadvisor || true &&
+                                docker run -d --name cadvisor --restart unless-stopped -p 8080:8080 \\
+                                  -v /:/rootfs:ro -v /var/run:/var/run:ro -v /sys:/sys:ro -v /var/lib/docker/:/var/lib/docker:ro \\
+                                  gcr.io/cadvisor/cadvisor:latest
                             '
                         """
                     }
@@ -172,44 +169,61 @@ pipeline {
             }
         }
 
-        stage('Configure Monitoring (Node 3)') {
+        stage('Configure Monitoring Stack (Node 3)') {
             steps {
                 script {
                     sshagent(credentials: ['aws-ssh-key']) {
                         sh """
                             ssh -o StrictHostKeyChecking=no ubuntu@\${NODE3_IP} '
-                                wget https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb &&
-                                sudo dpkg -i -E ./amazon-cloudwatch-agent.deb &&
-                                
-                                cat << "CONFIG_EOF" > config.json
-                                {
-                                    "agent": {
-                                        "metrics_collection_interval": 60,
-                                        "run_as_user": "root"
-                                    },
-                                    "metrics": {
-                                        "metrics_collected": {
-                                            "cpu": {
-                                                "measurement": [
-                                                    "cpu_usage_idle",
-                                                    "cpu_usage_iowait",
-                                                    "cpu_usage_user",
-                                                    "cpu_usage_system"
-                                                ],
-                                                "metrics_collection_interval": 60,
-                                                "totalcpu": false
-                                            }
-                                        }
-                                    }
-                                }
-CONFIG_EOF
+                                # Generate Prometheus configuration targeting Node 1
+                                cat << EOF > /home/ubuntu/prometheus.yml
+global:
+  scrape_interval: 15s
 
-                                sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:config.json
+scrape_configs:
+  - job_name: "node1-swiggy-server"
+    static_configs:
+      - targets: ["\${NODE1_IP}:9100", "\${NODE1_IP}:8080"]
+EOF
+
+                                # Run Prometheus
+                                docker rm -f prometheus || true
+                                docker run -d --name prometheus --restart unless-stopped \\
+                                  -p 9090:9090 \\
+                                  -v /home/ubuntu/prometheus.yml:/etc/prometheus/prometheus.yml \\
+                                  prom/prometheus
+
+                                # Run Grafana
+                                docker rm -f grafana || true
+                                docker run -d --name grafana --restart unless-stopped \\
+                                  -p 3000:3000 \\
+                                  grafana/grafana
                             '
                         """
                     }
                 }
             }
+        }
+    }
+
+    post {
+        success {
+            sh '''
+                aws sns publish \
+                  --topic-arn "${SNS_TOPIC_ARN}" \
+                  --subject "BUILD SUCCESS: Swiggy Pipeline #${BUILD_NUMBER}" \
+                  --message "Pipeline completed successfully for build #${BUILD_NUMBER}. Swiggy deployment on Node 1 is live, and Node 3 Prometheus/Grafana monitoring is active." \
+                  --region ${AWS_REGION}
+            '''
+        }
+        failure {
+            sh '''
+                aws sns publish \
+                  --topic-arn "${SNS_TOPIC_ARN}" \
+                  --subject "BUILD FAILED: Swiggy Pipeline #${BUILD_NUMBER}" \
+                  --message "Pipeline failed during build #${BUILD_NUMBER}. Please check Jenkins console logs." \
+                  --region ${AWS_REGION}
+            '''
         }
     }
 }
