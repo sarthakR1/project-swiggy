@@ -19,6 +19,7 @@ pipeline {
         NODE3_IP      = '10.0.1.40'
         SNS_TOPIC_ARN = 'arn:aws:sns:ap-south-1:176938213994:jenkins-pipeline-notifications'
         AWS_REGION    = 'ap-south-1'
+        NODE_OPTIONS  = "--max-old-space-size=512"
     }
 
     stages {
@@ -140,7 +141,8 @@ pipeline {
                 }
             }
         }
-stage('Deploy Application & Metrics (Node 1)') {
+
+        stage('Deploy Application & Metrics (Node 1)') {
             steps {
                 script {
                     sshagent(credentials: ['aws-ssh-key']) {
@@ -207,22 +209,22 @@ EOF
 
     post {
         success {
-            sh """
-                aws sns publish \\
-                  --topic-arn '${SNS_TOPIC_ARN}' \\
-                  --subject 'BUILD SUCCESS: Swiggy Pipeline #${BUILD_NUMBER}' \\
-                  --message 'Pipeline completed successfully for build #${BUILD_NUMBER}. Swiggy deployment on Node 1 is live, and Node 3 Prometheus/Grafana monitoring is active.' \\
-                  --region '${AWS_REGION}'
-            """
+            sh '''
+                aws sns publish \
+                  --topic-arn "${SNS_TOPIC_ARN}" \
+                  --subject "BUILD_SUCCESS_Swiggy_Pipeline_${BUILD_NUMBER}" \
+                  --message "Pipeline completed successfully for build #${BUILD_NUMBER}. Deployment on Node 1 is live." \
+                  --region "${AWS_REGION}"
+            '''
         }
         failure {
-            sh """
-                aws sns publish \\
-                  --topic-arn '${SNS_TOPIC_ARN}' \\
-                  --subject 'BUILD FAILED: Swiggy Pipeline #${BUILD_NUMBER}' \\
-                  --message 'Pipeline failed during build #${BUILD_NUMBER}. Please check Jenkins console logs.' \\
-                  --region '${AWS_REGION}'
-            """
+            sh '''
+                aws sns publish \
+                  --topic-arn "${SNS_TOPIC_ARN}" \
+                  --subject "BUILD_FAILED_Swiggy_Pipeline_${BUILD_NUMBER}" \
+                  --message "Pipeline failed during build #${BUILD_NUMBER}. Please check Jenkins console logs." \
+                  --region "${AWS_REGION}"
+            '''
         }
     }
 }
