@@ -1,50 +1,50 @@
 pipeline {
-    agent any
-
-    options {
-        skipDefaultCheckout(true)
-        timestamps()
+    agent any 
+    
+    options { 
+        skipDefaultCheckout(true) 
+        timestamps() 
     }
-
-    tools {
-        jdk 'jdk21'
-        nodejs 'node20'
+    
+    tools { 
+        jdk 'jdk21' 
+        nodejs 'node20' 
     }
-
-    environment {
-        SCANNER_HOME  = tool 'sonar-scanner'
-        IMAGE_REPO    = 'sarthakr1/swiggy'
-        IMAGE_TAG     = "${BUILD_NUMBER}"
-        NODE1_IP      = '10.0.1.77'
-        NODE3_IP      = '10.0.1.40'
-        SNS_TOPIC_ARN = 'arn:aws:sns:ap-south-1:176938213994:jenkins-pipeline-notifications'
-        AWS_REGION    = 'ap-south-1'
-        NODE_OPTIONS  = "--max-old-space-size=512"
+    
+    environment { 
+        SCANNER_HOME  = tool 'sonar-scanner' 
+        IMAGE_REPO    = 'sarthakr1/swiggy' 
+        IMAGE_TAG     = "${BUILD_NUMBER}" 
+        NODE1_IP      = '10.0.1.77' 
+        NODE3_IP      = '10.0.1.40' 
+        SNS_TOPIC_ARN = 'arn:aws:sns:ap-south-1:176938213994:jenkins-pipeline-notifications' 
+        AWS_REGION    = 'ap-south-1' 
+        NODE_OPTIONS  = "--max-old-space-size=512" 
     }
-
+    
     stages {
         stage('Clean Workspace') {
             steps {
                 cleanWs()
             }
         }
-
+        
         stage('Checkout') {
             steps {
                 git(
-                    branch: 'main',
-                    credentialsId: 'github-cred',
+                    branch: 'main', 
+                    credentialsId: 'github-cred', 
                     url: 'https://github.com/sarthakR1/project-swiggy.git'
                 )
             }
         }
-
+        
         stage('Install Dependencies') {
             steps {
                 sh 'npm ci'
             }
         }
-
+        
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('sonar-server') {
@@ -57,7 +57,7 @@ pipeline {
                 }
             }
         }
-
+        
         stage('Quality Gate') {
             steps {
                 script {
@@ -65,15 +65,15 @@ pipeline {
                 }
             }
         }
-
+        
         stage('OWASP Dependency Check') {
             steps {
                 withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_KEY')]) {
                     dependencyCheck(
-                        odcInstallation: 'dependency-check',
+                        odcInstallation: 'dependency-check', 
                         additionalArguments: '''
                             --nvdApiKey ${NVD_KEY} 
-                            --data /var/lib/jenkins/dependency-check-data
+                            --data /var/lib/jenkins/dependency-check-data 
                             --format HTML 
                             --format XML 
                             --exclude "**/node_modules/**" 
@@ -92,7 +92,7 @@ pipeline {
                 }
             }
         }
-
+        
         stage('Trivy FS Scan') {
             steps {
                 sh '''
@@ -105,7 +105,7 @@ pipeline {
                 '''
             }
         }
-
+        
         stage('Docker Build') {
             steps {
                 sh '''
@@ -115,7 +115,7 @@ pipeline {
                 '''
             }
         }
-
+        
         stage('Trivy Image Scan') {
             steps {
                 sh '''
@@ -127,7 +127,7 @@ pipeline {
                 '''
             }
         }
-
+        
         stage('Docker Push') {
             steps {
                 script {
@@ -141,18 +141,18 @@ pipeline {
                 }
             }
         }
-
+        
         stage('Deploy Application & Metrics (Node 1)') {
             steps {
                 script {
                     sshagent(credentials: ['aws-ssh-key']) {
                         sh """
-                            ssh -o StrictHostKeyChecking=no ubuntu@${NODE1_IP} '
+                            ssh -o StrictHostKeyChecking=no ubuntu@\${NODE1_IP} '
                                 # 1. Clean & Deploy Swiggy App
                                 docker system prune -af &&
-                                docker pull ${IMAGE_REPO}:${IMAGE_TAG} &&
+                                docker pull \${IMAGE_REPO}:\${IMAGE_TAG} &&
                                 docker rm -f swiggy || true &&
-                                docker run -d --name swiggy --restart unless-stopped -p 3000:3000 ${IMAGE_REPO}:${IMAGE_TAG} &&
+                                docker run -d --name swiggy --restart unless-stopped -p 3000:3000 \${IMAGE_REPO}:\${IMAGE_TAG} &&
                                 
                                 # 2. Deploy Node Exporter (Server Hardware Metrics)
                                 docker rm -f node-exporter || true &&
@@ -169,22 +169,21 @@ pipeline {
                 }
             }
         }
-
+        
         stage('Configure Monitoring Stack (Node 3)') {
             steps {
                 script {
                     sshagent(credentials: ['aws-ssh-key']) {
                         sh """
-                            ssh -o StrictHostKeyChecking=no ubuntu@${NODE3_IP} '
+                            ssh -o StrictHostKeyChecking=no ubuntu@\${NODE3_IP} '
                                 # Generate Prometheus configuration targeting Node 1
                                 cat << EOF > /home/ubuntu/prometheus.yml
 global:
   scrape_interval: 15s
-
 scrape_configs:
   - job_name: "node1-swiggy-server"
     static_configs:
-      - targets: ["${NODE1_IP}:9100", "${NODE1_IP}:8080"]
+      - targets: ["\${NODE1_IP}:9100", "\${NODE1_IP}:8080"]
 EOF
 
                                 # Run Prometheus
@@ -206,24 +205,25 @@ EOF
             }
         }
     }
-
+    
     post {
-    success {
-        sh '''
-            aws sns publish \
-              --topic-arn "arn:aws:sns:ap-south-1:176938213994:jenkins-pipeline-notifications" \
-              --subject "BUILD SUCCESS: Swiggy Pipeline #${BUILD_NUMBER}" \
-              --message "Pipeline completed successfully for build #${BUILD_NUMBER}. Deployment on Node 1 is live." \
-              --region "ap-south-1"
-        '''
-    }
-    failure {
-        sh '''
-            aws sns publish \
-              --topic-arn "arn:aws:sns:ap-south-1:176938213994:jenkins-pipeline-notifications" \
-              --subject "BUILD FAILED: Swiggy Pipeline #${BUILD_NUMBER}" \
-              --message "Pipeline failed during build #${BUILD_NUMBER}. Please check Jenkins console logs." \
-              --region "ap-south-1"
-        '''
+        success {
+            sh """
+                aws sns publish \\
+                  --topic-arn "${SNS_TOPIC_ARN}" \\
+                  --subject "BUILD SUCCESS: Swiggy Pipeline #${BUILD_NUMBER}" \\
+                  --message "Pipeline completed successfully for build #${BUILD_NUMBER}. Deployment on Node 1 is live." \\
+                  --region "${AWS_REGION}"
+            """
+        }
+        failure {
+            sh """
+                aws sns publish \\
+                  --topic-arn "${SNS_TOPIC_ARN}" \\
+                  --subject "BUILD FAILED: Swiggy Pipeline #${BUILD_NUMBER}" \\
+                  --message "Pipeline failed during build #${BUILD_NUMBER}. Please check Jenkins console logs." \\
+                  --region "${AWS_REGION}"
+            """
+        }
     }
 }
